@@ -1,140 +1,114 @@
 # Project 5.3 – Advanced Monitoring, Alerting, and Distributed Tracing
 
-Implement a monitoring and observability solution using **Prometheus, Prometheus Recording Rules, Alertmanager, Slack notifications, Jaeger, and the HotROD demo application**.
+Implement an observability solution using **Prometheus, recording rules, Alertmanager, Slack notifications, Jaeger, and the HotROD demo application**.
 
-This guide is designed for learners using the existing repository. Clone the repository, follow the tasks in order, validate each component, and capture evidence of your implementation.
+This guide uses the configuration files already included in this repository. **Do not recreate `prometheus.yml`, `alerts.yml`, or `recording_rules.yml`.** Review and reuse them, changing only environment-specific values when needed.
 
 ## 1. Project Overview
 
-The objective of this project is to build an observability solution that collects metrics, evaluates alerts, delivers notifications, and visualizes distributed traces.
+The objective is to collect metrics, pre-calculate useful PromQL expressions, detect infrastructure issues, deliver notifications, and investigate distributed traces.
 
-**Technologies used**
-
-- **Prometheus:** Metrics collection, querying, recording rules, and alert evaluation.
-- **Node Exporter:** Host-level metrics collection.
-- **Alertmanager:** Alert grouping, routing, and notification management.
-- **Slack:** Alert notification destination.
-- **Jaeger:** Distributed tracing and trace visualization.
-- **HotROD:** Sample application that generates distributed traces.
-- **Docker:** Container deployment and networking.
-- **Google Cloud Platform:** Virtual machines and firewall configuration.
+**Technologies:** Prometheus, Node Exporter, cAdvisor, Alertmanager, Slack, Jaeger, HotROD, Docker, and Google Cloud Platform.
 
 ## 2. Problem Statement
 
-Without a centralized monitoring and observability solution, teams may struggle to identify unavailable services, investigate high resource utilization, receive timely alerts, and trace slow requests across application components.
-
-This project addresses these challenges by implementing recording rules for frequently queried metrics, alerting rules for service availability and CPU utilization, Alertmanager notifications, and distributed tracing with Jaeger.
+Without centralized monitoring and observability, teams can struggle to identify unavailable services, detect sustained high CPU utilization, receive timely alerts, and trace slow requests across application components. This project combines metrics, recording rules, alerting, notifications, and distributed tracing to address these challenges.
 
 ## 3. Architecture
 
 ```text
-                    Google Cloud Platform
-                   ┌─────────────────────┐
-                   │    monitoring-vm    │
-                   │                     │
-                   │     Prometheus      │
-                   │     Alertmanager    │
-                   │       Jaeger        │
-                   └──────────┬──────────┘
-                              │
-                  Metrics     │     Traces (OTLP)
-                              │
-                   ┌──────────▼──────────┐
-                   │      target-vm      │
-                   │                     │
-                   │    Node Exporter    │
-                   │       HotROD        │
-                   └─────────────────────┘
+                     Google Cloud Platform
+                   ┌────────────────────────┐
+                   │      monitoring-vm     │
+                   │ Prometheus             │
+                   │ Alertmanager           │
+                   │ Jaeger                 │
+                   └───────────┬────────────┘
+                               │
+                    Metrics    │    Traces (OTLP)
+                               │
+                   ┌───────────▼────────────┐
+                   │       target-vm        │
+                   │ Node Exporter           │
+                   │ HotROD                  │
+                   └────────────────────────┘
 
-Prometheus → Alertmanager → Slack
+Node Exporter / cAdvisor → Prometheus → Alertmanager → Slack
 HotROD → Jaeger → Trace visualization
-Node Exporter → Prometheus → Metrics and alerts
 ```
 
-The architecture separates monitoring services from the target application and metrics exporter. Use private VM-to-VM communication wherever possible.
+Use private VM-to-VM communication wherever possible. Expose user interfaces only to trusted source IP addresses.
 
 ## 4. Prerequisites
 
-Before starting, ensure you have:
-
-- A Google Cloud project with permission to create Compute Engine VMs and firewall rules.
-- Two Ubuntu virtual machines, or equivalent Linux hosts:
+- A Google Cloud project with permission to manage Compute Engine VMs and firewall rules.
+- Two Ubuntu VMs or equivalent Linux hosts:
   - `monitoring-vm`: Prometheus, Alertmanager, and Jaeger.
   - `target-vm`: Node Exporter and HotROD.
-- Docker installed and running on both machines.
-- SSH access to both machines.
-- A Slack workspace where you can configure an incoming webhook.
-- Access to the existing GitHub repository.
-- Basic knowledge of Linux, Docker, YAML, PromQL, and GCP networking.
+- Docker installed and running on the relevant VMs.
+- SSH access, a Slack workspace, and permission to create an incoming webhook.
+- Basic Linux, Docker, YAML, PromQL, and GCP networking knowledge.
 
-Example VM specifications used in this assignment:
+Example VM sizes used during this assignment are `e2-standard-2` for monitoring and `e2-medium` for the target. Adjust them to your needs.
 
-| VM | Example machine type | Operating system |
-|---|---|---|
-| monitoring-vm | e2-standard-2 | Ubuntu 24.04 |
-| target-vm | e2-medium | Ubuntu 24.04 |
+## 5. Clone the Repository and Reuse Existing Configuration
 
-Actual machine types can be adjusted to your available resources.
-
-## 5. Clone the Repository
-
-Clone the existing project repository onto your workstation:
+On your workstation:
 
 ```bash
 git clone https://github.com/SnehalShinde11/Advanced-Monitoring-pro-graph.git
 cd Advanced-Monitoring-pro-graph
-```
-
-Review the existing files and instructions before making changes:
-
-```bash
-git status
-git branch
 ls -la
 ```
 
-Follow the repository's existing structure. Do not create a separate repository for this assignment.
+The repository already contains these configuration files:
 
-**Important:** The Prometheus and Alertmanager configuration directories used on the monitoring VM are `/opt/prometheus-5.3` and `/opt/alertmanager-5.3`. Keep credentials and other secrets out of Git.
+| File | Purpose |
+|---|---|
+| `prometheus.yml` | Scrape jobs, alertmanager connection, and rule-file references |
+| `alerts.yml` | `InstanceDown` and `HighCPUUsage` alert rules |
+| `recording_rules.yml` | CPU, memory, and network recording rules |
+| `prometheus.yml.backup` | Backup copy of the Prometheus configuration |
 
-## 6. Task 1 – Implement Prometheus Recording Rules
-
-### Objective
-
-Create recording rules to pre-calculate frequently used or computationally expensive PromQL expressions, such as CPU utilization over a 10-minute window.
-
-### Step 1: Prepare the Prometheus configuration directory
-
-On `monitoring-vm`:
+Inspect the files before deployment:
 
 ```bash
-sudo mkdir -p /opt/prometheus-5.3
-sudo ls -la /opt/prometheus-5.3
+cat prometheus.yml
+cat alerts.yml
+cat recording_rules.yml
 ```
 
-Create or update the Prometheus configuration file:
+### Copy the existing files to monitoring-vm
+
+From your workstation, replace `MONITORING_VM_EXTERNAL_IP` with the current external IP address:
 
 ```bash
-sudo vi /opt/prometheus-5.3/prometheus.yml
+ssh USERNAME@MONITORING_VM_EXTERNAL_IP 'sudo mkdir -p /opt/prometheus-5.3'
+scp prometheus.yml alerts.yml recording_rules.yml USERNAME@MONITORING_VM_EXTERNAL_IP:/tmp/
+ssh USERNAME@MONITORING_VM_EXTERNAL_IP
+sudo mv /tmp/prometheus.yml /tmp/alerts.yml /tmp/recording_rules.yml /opt/prometheus-5.3/
+sudo chown root:root /opt/prometheus-5.3/*.yml
+sudo chmod 644 /opt/prometheus-5.3/*.yml
+ls -l /opt/prometheus-5.3
 ```
 
-Ensure that the configuration includes the appropriate scrape jobs, rule file paths, and target addresses for your environment.
+Replace `USERNAME` with your SSH username. If the VM cannot accept SCP to `/tmp`, clone the repository on the VM and copy the files locally instead.
 
-### Step 2: Create recording rules
+**Do not create replacement versions of these three files.** Make edits to the existing files only when a setting needs to match your environment. In particular, confirm the Node Exporter address in `prometheus.yml` matches the target VM's private IP. The committed example uses `10.128.0.29:9100`.
 
-Create the recording rules file:
+The existing `prometheus.yml` already references both rule files and configures Alertmanager at `alertmanager:9093`. It also includes a Jaeger scrape job at `jaeger:8888`; verify that this endpoint is supported by the Jaeger version you deploy before expecting that target to be UP.
 
-```bash
-sudo vi /opt/prometheus-5.3/recording_rules.yml
-```
+Keep credentials and webhook URLs out of Git.
 
-Define four recording rules for frequently used metrics. The rules should include the CPU utilization expression used in the later verification step:
+## 6. Task 1 – Validate Prometheus Recording Rules
 
-`instance:cpu_usage_percent:10m`
+The existing `recording_rules.yml` defines four recording rules:
+- `instance:cpu_usage_percent:10m`
+- `instance:memory_usage_percent`
+- `instance:network_receive_bytes_per_second`
+- `instance:network_transmit_bytes_per_second`
 
-Ensure that the expressions match the metric names and labels exposed by your Node Exporter targets.
-
-### Step 3: Validate recording rules
+On `monitoring-vm`, validate the existing file:
 
 ```bash
 sudo docker run --rm \
@@ -144,15 +118,30 @@ sudo docker run --rm \
   check rules /etc/prometheus/recording_rules.yml
 ```
 
-Expected result:
+Expected result: `SUCCESS: 4 rules found`.
 
-```text
-SUCCESS: 4 rules found
+The CPU expression relies on Node Exporter metrics. If the query returns no data, check that the Node Exporter target is reachable and has been scraped long enough to provide a 10-minute rate window.
+
+## 7. Task 2 – Validate Alerting Rules and Start Prometheus
+
+The existing `alerts.yml` defines:
+
+| Alert | Condition | Pending period |
+|---|---|---|
+| `InstanceDown` | `up == 0` | 1 minute |
+| `HighCPUUsage` | `instance:cpu_usage_percent:10m > 80` | 5 minutes |
+
+Validate the existing alert rules:
+
+```bash
+sudo docker run --rm \
+  --entrypoint /bin/promtool \
+  -v /opt/prometheus-5.3/alerts.yml:/etc/prometheus/alerts.yml:ro \
+  prom/prometheus \
+  check rules /etc/prometheus/alerts.yml
 ```
 
-### Step 4: Validate the Prometheus configuration
-
-Create the alerting rules file in Task 2 before running this validation.
+Validate the existing Prometheus configuration and both rule files:
 
 ```bash
 sudo docker run --rm \
@@ -164,59 +153,13 @@ sudo docker run --rm \
   check config /etc/prometheus/prometheus.yml
 ```
 
-Resolve any configuration errors before starting Prometheus.
+Resolve any validation errors before deployment. Confirm the existing Docker network named `monitoring` exists and that your Prometheus, Alertmanager, and cAdvisor container names/network configuration are consistent.
 
-## 7. Task 2 – Define Alerting Rules
-
-### Objective
-
-Configure alerts to detect unavailable monitoring targets and sustained high CPU utilization.
-
-### Step 1: Create alerting rules
-
-Create the alert rules file:
+If Prometheus is not already running, start it using the repository files:
 
 ```bash
-sudo vi /opt/prometheus-5.3/alerts.yml
-```
+sudo docker network inspect monitoring >/dev/null 2>&1 || sudo docker network create monitoring
 
-Configure the following alerts:
-
-| Alert | Purpose | Example condition |
-|---|---|---|
-| `InstanceDown` | Detects a monitored target that is unavailable | `up == 0`, pending for 1 minute |
-| `HighCPUUsage` | Detects sustained high CPU utilization | CPU usage above 80%, pending for 5 minutes |
-
-Set appropriate severity labels and annotations so that notifications contain useful context.
-
-### Step 2: Validate the alerting rules
-
-```bash
-sudo docker run --rm \
-  --entrypoint /bin/promtool \
-  -v /opt/prometheus-5.3/alerts.yml:/etc/prometheus/alerts.yml:ro \
-  prom/prometheus \
-  check rules /etc/prometheus/alerts.yml
-```
-
-### Step 3: Start Prometheus with the rule files
-
-If an older Prometheus container is running, inspect it before replacing it:
-
-```bash
-sudo docker ps -a | grep prometheus
-```
-
-Stop and remove the existing container only after confirming that its configuration and data requirements are understood:
-
-```bash
-sudo docker stop prometheus
-sudo docker rm prometheus
-```
-
-Start Prometheus on the existing `monitoring` Docker network:
-
-```bash
 sudo docker run -d \
   --name prometheus \
   --restart unless-stopped \
@@ -228,222 +171,55 @@ sudo docker run -d \
   prom/prometheus
 ```
 
-Check the container and its health endpoint:
+If a container named `prometheus` already exists, inspect it first with `sudo docker ps -a`. Do not remove an existing container without confirming its configuration and data requirements. If you update the mounted host configuration, restart Prometheus to reload it.
+
+Verify Prometheus and the rules:
 
 ```bash
-sudo docker ps
 curl http://localhost:9090/-/healthy
-```
-
-### Step 4: Verify loaded rules
-
-```bash
-curl -s http://localhost:9090/api/v1/rules \
-  | python3 -m json.tool \
-  | grep -E '"name"|"type"|"health"|"state"|"alert"' \
-  | head -80
-```
-
-Verify that the CPU recording metric is returning data:
-
-```bash
+curl -s http://localhost:9090/api/v1/rules | python3 -m json.tool
 curl -G -s http://localhost:9090/api/v1/query \
   --data-urlencode 'query=instance:cpu_usage_percent:10m' \
   | python3 -m json.tool
 ```
 
-Expected result: the four recording rules are loaded and healthy, and the CPU recording query returns a result for the monitored Node Exporter target, such as `10.128.0.29:9100` in the example environment.
-
-**Note:** Rule health, rule evaluation state, and target availability are different things. A healthy rule does not mean every target is `UP`. Verify these independently.
+Open `http://MONITORING_VM_EXTERNAL_IP:9090` to review **Status → Targets** and **Alerts**. Restrict firewall access to trusted IPs.
 
 ## 8. Task 3 – Configure Alertmanager and Slack Notifications
 
-### Objective
-
-Connect Prometheus to Alertmanager, verify that alerts are delivered, and configure Slack as a notification receiver.
-
-### Step 1: Prepare Alertmanager
+The repository already configures Prometheus to send alerts to `alertmanager:9093`. You only need to create the runtime-specific Alertmanager configuration because it contains environment-specific routing and Slack integration details.
 
 On `monitoring-vm`:
 
 ```bash
 sudo mkdir -p /opt/alertmanager-5.3
-cd /opt/alertmanager-5.3
-sudo vi alertmanager.yml
+sudo vi /opt/alertmanager-5.3/alertmanager.yml
 ```
 
-Configure Alertmanager with a valid receiver and routing configuration. Add the Slack receiver in the Slack configuration steps below.
+Configure a default route and receiver. For Slack, use a receiver with `api_url_file` pointing to a mounted secret file; do not hardcode the webhook in the repository. The secret file must contain only the webhook URL.
 
-### Step 2: Start Alertmanager
+Create a Slack incoming webhook:
 
-Confirm that the Docker network `monitoring` exists and is also used by Prometheus.
+1. Visit [Slack API app management](https://api.slack.com/apps).
+2. Create or select an app for the intended workspace.
+3. Enable **Incoming Webhooks**.
+4. Add a webhook to the desired channel and copy its URL.
+5. Treat the URL like a password. Never commit it or publish it in screenshots/logs.
+
+Store the URL on the VM in a protected file:
 
 ```bash
-sudo docker run -d \
-  --name alertmanager \
-  --restart unless-stopped \
-  --network monitoring \
-  -p 9093:9093 \
-  -v /opt/alertmanager-5.3/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro \
-  prom/alertmanager
+sudo sh -c 'umask 077; printf "%s" "PASTE_YOUR_SLACK_WEBHOOK_URL_HERE" > /opt/alertmanager-5.3/slack_webhook_url'
+sudo chmod 600 /opt/alertmanager-5.3/slack_webhook_url
 ```
 
-Validate the container:
-
-```bash
-sudo docker ps | grep alertmanager
-curl http://localhost:9093/-/healthy
-```
-
-### Step 3: Connect Prometheus to Alertmanager
-
-Update `/opt/prometheus-5.3/prometheus.yml` with an Alertmanager configuration pointing to the container name:
-
-```yaml
-alerting:
-  alertmanagers:
-    - static_configs:
-        - targets:
-            - "alertmanager:9093"
-```
-
-Keep the existing `scrape_configs` and `rule_files` entries. Because both containers share the `monitoring` Docker network, Prometheus can resolve Alertmanager by its container name.
-
-Validate the configuration again:
-
-```bash
-sudo docker run --rm \
-  --entrypoint /bin/promtool \
-  -v /opt/prometheus-5.3/prometheus.yml:/etc/prometheus/prometheus.yml:ro \
-  -v /opt/prometheus-5.3/alerts.yml:/etc/prometheus/alerts.yml:ro \
-  -v /opt/prometheus-5.3/recording_rules.yml:/etc/prometheus/recording_rules.yml:ro \
-  prom/prometheus \
-  check config /etc/prometheus/prometheus.yml
-```
-
-Restart Prometheus to apply the updated configuration:
-
-```bash
-sudo docker restart prometheus
-```
-
-Verify the Alertmanager connection:
-
-```bash
-curl -s http://localhost:9090/api/v1/alertmanagers \
-  | python3 -m json.tool
-```
-
-### Step 4: Test the InstanceDown alert
-
-On `target-vm`, stop Node Exporter temporarily:
-
-```bash
-sudo docker ps
-sudo docker stop node-exporter
-```
-
-Wait long enough for the scrape interval and alert's `for` duration to elapse. For an alert configured with `for: 1m`, allow at least 70–120 seconds.
-
-On `monitoring-vm`, inspect the alert state:
-
-```bash
-curl -s http://localhost:9090/api/v1/alerts \
-  | python3 -m json.tool
-```
-
-Look for:
-
-- `alertname`: `InstanceDown`
-- `state`: `firing`
-
-Check that Alertmanager received the alert:
-
-```bash
-curl -s http://localhost:9093/api/v2/alerts \
-  | python3 -m json.tool
-```
-
-Restore Node Exporter on `target-vm`:
-
-```bash
-sudo docker start node-exporter
-sudo docker ps | grep node-exporter
-```
-
-After the next scrape, verify that the target is up again:
-
-```bash
-curl -G -s http://localhost:9090/api/v1/query \
-  --data-urlencode 'query=up{job="node-exporter"}' \
-  | python3 -m json.tool
-```
-
-The target's `up` value should return to `1`.
-
-### Step 5: Create a Slack incoming webhook
-
-1. Open the [Slack API app management page](https://api.slack.com/apps).
-2. Create a new app using **From scratch**.
-3. Name it, for example, `Prometheus Alertmanager`, and select the intended workspace.
-4. Open **Incoming Webhooks** and enable them.
-5. Add a webhook to the desired channel, such as `#all-devops-journey`.
-6. Authorize Slack to create the webhook and copy the generated URL.
-
-Treat the webhook URL like a password. Never commit it to Git, publish it in screenshots, or paste it into public logs.
-
-### Step 6: Store the Slack webhook securely
-
-On `monitoring-vm`, create a protected environment file:
-
-```bash
-sudo vi /opt/alertmanager-5.3/slack.env
-```
-
-Add the actual webhook URL:
-
-```bash
-SLACK_WEBHOOK_URL='PASTE_YOUR_SLACK_WEBHOOK_URL_HERE'
-```
-
-Restrict access:
-
-```bash
-sudo chmod 600 /opt/alertmanager-5.3/slack.env
-sudo ls -l /opt/alertmanager-5.3/slack.env
-```
-
-Create the separate webhook file expected by the Alertmanager configuration. The following command extracts the value without the surrounding single quotes:
-
-```bash
-sudo sh -c 'sed -n "s/^SLACK_WEBHOOK_URL='\''\(.*\)'\''$/\1/p" /opt/alertmanager-5.3/slack.env > /opt/alertmanager-5.3/slack_webhook_url'
-```
-
-Ensure the file contains only the URL, with no quotes or extra whitespace. Do not print its contents in shared terminals, logs, or screenshots.
-
-### Step 7: Configure Alertmanager's Slack receiver
-
-Update `alertmanager.yml` to use the webhook file rather than embedding the secret directly. The receiver's Slack configuration should use `api_url_file` with this path:
+Replace the placeholder locally with your actual webhook URL. Do not include quote characters or a trailing newline in the secret file. Configure the Slack receiver in `alertmanager.yml` to use:
 
 ```yaml
 api_url_file: /etc/alertmanager/secrets/slack_webhook_url
 ```
 
-Keep the appropriate Slack receiver and routing settings in the file. Ensure the YAML is correctly indented and that the receiver is referenced by the route.
-
-Set permissions on the host-side webhook file so that the non-root Alertmanager process can read it:
-
-```bash
-sudo chown 65534:65534 /opt/alertmanager-5.3/slack_webhook_url
-sudo chmod 600 /opt/alertmanager-5.3/slack_webhook_url
-sudo ls -ln /opt/alertmanager-5.3/slack_webhook_url
-```
-
-The numeric owner shown above is appropriate for the common non-root container user with UID/GID `65534`; verify the actual user in your container if it differs.
-
-### Step 8: Validate and recreate Alertmanager
-
-Validate the configuration:
+Ensure the route references the Slack receiver and the configuration uses valid YAML. Validate it:
 
 ```bash
 sudo docker run --rm \
@@ -454,12 +230,9 @@ sudo docker run --rm \
   check-config /etc/alertmanager/alertmanager.yml
 ```
 
-If validation succeeds, recreate the running container so it can mount the webhook file:
+Start Alertmanager on the same Docker network as Prometheus:
 
 ```bash
-sudo docker stop alertmanager
-sudo docker rm alertmanager
-
 sudo docker run -d \
   --name alertmanager \
   --restart unless-stopped \
@@ -470,62 +243,47 @@ sudo docker run -d \
   prom/alertmanager
 ```
 
-Check the container and verify file readability without printing the secret:
+If an Alertmanager container already exists, inspect it and recreate it only if necessary to mount the configuration and secret. Verify:
 
 ```bash
-sudo docker ps | grep alertmanager
 curl http://localhost:9093/-/healthy
-
-sudo docker exec alertmanager \
-  sh -c 'test -r /etc/alertmanager/secrets/slack_webhook_url && echo "Webhook file is readable"'
+curl -s http://localhost:9090/api/v1/alertmanagers | python3 -m json.tool
 ```
 
-### Step 9: Test the Slack notification pipeline
+### Test the notification pipeline
 
-Stop Node Exporter on `target-vm` again:
+On `target-vm`, temporarily stop Node Exporter (confirm the container name first):
 
 ```bash
+sudo docker ps
 sudo docker stop node-exporter
 ```
 
-Wait at least 70–120 seconds, depending on the scrape interval and alert configuration. On `monitoring-vm`, check:
+Wait for the scrape interval plus the alert's `for: 1m` duration (allow around 70–120 seconds). On `monitoring-vm`, inspect alerts:
 
 ```bash
-curl -s http://localhost:9090/api/v1/alerts \
-  | python3 -m json.tool
-```
-
-Confirm that `InstanceDown` is firing, then check the configured Slack channel for the notification.
-
-If the message does not arrive, inspect Alertmanager's logs:
-
-```bash
+curl -s http://localhost:9090/api/v1/alerts | python3 -m json.tool
+curl -s http://localhost:9093/api/v2/alerts | python3 -m json.tool
 sudo docker logs alertmanager --tail 100
 ```
 
-For a `permission denied` error, check the webhook file's owner, mode, mount path, and container user. If the file contains quote characters, correct the file contents and restart Alertmanager.
-
-Finally, restore Node Exporter:
+Confirm `InstanceDown` fires and a Slack message reaches the configured channel. Restore Node Exporter immediately after the test:
 
 ```bash
 sudo docker start node-exporter
 ```
 
+If no notification arrives, inspect the alert state, Alertmanager route/receiver, container logs, webhook file permissions, and webhook URL validity. Do not print the webhook file contents to diagnose it.
+
 ## 9. Task 4 – Deploy Jaeger
 
-### Objective
-
-Deploy Jaeger to collect, store, and visualize distributed traces generated by the sample application.
-
-### Step 1: Deploy Jaeger
-
-On `monitoring-vm`, ensure the `monitoring` Docker network exists:
+On `monitoring-vm`, confirm the Docker network exists:
 
 ```bash
 sudo docker network inspect monitoring
 ```
 
-Deploy the Jaeger all-in-one image using a version that supports the OTLP protocol required by HotROD. The following command is a starting point for compatible all-in-one releases; verify the selected image's supported ports and configuration if its defaults differ.
+Run the Jaeger all-in-one image using a version compatible with the HotROD OTLP configuration:
 
 ```bash
 sudo docker run -d \
@@ -537,79 +295,35 @@ sudo docker run -d \
   jaegertracing/all-in-one:latest
 ```
 
-Check that the container is running:
+Check the container:
 
 ```bash
 sudo docker ps | grep jaeger
 sudo docker logs jaeger --tail 50
 ```
 
-Port `16686` is the Jaeger UI. Port `4318` is the OTLP HTTP receiver used by the example application. Do not expose OTLP ingestion publicly.
+Port `16686` is the Jaeger UI and `4318` is the OTLP HTTP receiver. Do not expose OTLP ingestion to the public internet.
 
-### Step 2: Configure secure access to the Jaeger UI
-
-To open the UI from your workstation, create a GCP firewall rule allowing TCP `16686` only from your public IP address.
-
-Find your workstation's public IP on your Mac terminal:
-
-```bash
-curl -4 https://ifconfig.me
-```
-
-In Google Cloud Console, navigate to **VPC network → Firewall → Create firewall rule** and configure:
-
-| Setting | Value |
-|---|---|
-| Name | `allow-jaeger-ui` |
-| Direction | Ingress |
-| Action | Allow |
-| Target | Specified target tags |
-| Target tag | `jaeger-ui` |
-| Source IPv4 range | Your public IP followed by `/32` |
-| Protocol and port | TCP `16686` |
-
-Add the `jaeger-ui` network tag to `monitoring-vm`.
-
-Open the UI at:
+To access the UI, create a GCP ingress firewall rule for TCP `16686`, targeting the `jaeger-ui` network tag and allowing only your workstation's public IP with a `/32` range. Add the `jaeger-ui` tag to `monitoring-vm`. Open:
 
 ```text
 http://MONITORING_VM_EXTERNAL_IP:16686
 ```
 
-Replace the placeholder with the current external IP of your VM. Restrict access to your own IP, and do not expose the UI unnecessarily.
+Use the current external IP and keep access restricted.
 
-## 10. Task 5 – Instrument and Run a Traced Application
+## 10. Task 5 – Run HotROD and Generate Traces
 
-### Objective
-
-Run the HotROD sample application and send its traces to Jaeger using OTLP HTTP.
-
-### Step 1: Verify the target VM
-
-Connect to `target-vm` and check the environment:
+On `target-vm`, verify Docker is available and test access to Jaeger using the monitoring VM's private IP:
 
 ```bash
-hostname
-sudo docker ps
-docker --version
-```
-
-### Step 2: Verify connectivity to Jaeger
-
-From `target-vm`, test the OTLP endpoint using the monitoring VM's **internal IP address**:
-
-```bash
-curl -sS -o /dev/null -w "HTTP status: %{http_code}\n" \
+curl -sS -o /dev/null -w "HTTP status: %{http_code}\\n" \
   http://MONITORING_VM_INTERNAL_IP:4318/
 ```
 
-An HTTP response, including a `404`, confirms that the endpoint is reachable. A timeout or connection refusal requires further investigation.
+An HTTP response, including `404`, indicates the endpoint is reachable. A timeout or connection refusal requires checking the private IP, container port binding, VPC firewall, and routing. Allow TCP `4318` from the target VM's private IP (`/32`) to the monitoring VM; do not open it publicly.
 
-If connectivity fails, check the VM network, Jaeger container port bindings, and GCP firewall configuration. Allow TCP `4318` from the target VM's internal IP with a `/32` source range, targeting the monitoring VM. Do not allow public internet access to this port.
-
-### Step 3: Run HotROD
-
-On `target-vm`, replace `MONITORING_VM_INTERNAL_IP` with the actual private IP of `monitoring-vm`:
+Run HotROD on `target-vm`, replacing the placeholder with the actual private IP of `monitoring-vm`:
 
 ```bash
 sudo docker run -d \
@@ -621,47 +335,20 @@ sudo docker run -d \
   all
 ```
 
-Check the application:
+Check the container and local endpoint:
 
 ```bash
 sudo docker ps | grep hotrod
-curl -sS -o /dev/null -w "HTTP status: %{http_code}\n" \
-  http://localhost:8080/
+curl -sS -o /dev/null -w "HTTP status: %{http_code}\\n" http://localhost:8080/
 ```
 
-### Step 4: Access the HotROD UI
-
-If you need to access HotROD from your workstation, create a GCP firewall rule for TCP `8080` restricted to your public IP.
-
-Example command from Google Cloud Shell, after replacing the placeholder:
-
-```bash
-gcloud compute firewall-rules create allow-hotrod-ui \
-  --network=default \
-  --direction=INGRESS \
-  --action=ALLOW \
-  --rules=tcp:8080 \
-  --source-ranges=YOUR_LAPTOP_PUBLIC_IP/32 \
-  --target-tags=hotrod-ui
-```
-
-Ensure the target VM has the `hotrod-ui` network tag and that `default` is the correct VPC network for your environment. If the rule already exists, inspect and update it rather than creating a duplicate.
-
-Open:
+To access HotROD remotely, create a GCP ingress firewall rule for TCP `8080`, targeting the `hotrod-ui` tag and restricted to your workstation's public IP followed by `/32`. Ensure the target VM has the tag and that you use the correct VPC network. Open:
 
 ```text
 http://TARGET_VM_EXTERNAL_IP:8080
 ```
 
-## 11. Task 6 – Analyze Distributed Traces
-
-### Objective
-
-Generate application requests, locate traces in Jaeger, and inspect span timelines to identify latency bottlenecks and service dependencies.
-
-### Step 1: Generate sample requests
-
-On `target-vm`, execute:
+Generate sample requests on `target-vm`:
 
 ```bash
 for i in {1..5}; do
@@ -669,106 +356,69 @@ for i in {1..5}; do
 done
 ```
 
-### Step 2: Verify Jaeger has discovered services
+## 11. Task 6 – Analyze Distributed Traces
 
-On `monitoring-vm`, run:
+On `monitoring-vm`, check whether Jaeger has received traces:
 
 ```bash
 curl -s http://localhost:16686/api/v3/services
 ```
 
-The response should list services when traces have been received and indexed.
+In the Jaeger UI:
 
-### Step 3: Inspect traces in the Jaeger UI
+1. Select `frontend` from the **Service** dropdown.
+2. Click **Find Traces** and open a recent trace.
+3. Inspect the waterfall/timeline and compare span durations.
+4. Identify slow operations and review span attributes and parent-child relationships.
 
-1. Open the Jaeger UI.
-2. Select `frontend` from the **Service** dropdown.
-3. Click **Find Traces**.
-4. Open the newest trace.
-5. Inspect the waterfall view and individual span durations.
-6. Identify the service calls contributing the most latency.
-7. Review span attributes and parent-child relationships to understand the request flow.
+If traces do not appear, generate more HotROD requests and check the application logs, OTLP endpoint, private network/firewall rules, and Jaeger logs.
 
-If no traces appear, generate additional requests and verify the OTLP endpoint, private network connectivity, HotROD logs, and Jaeger logs.
+## 12. Beyond the Basics – Scrape Jaeger Metrics with Prometheus
 
-## 12. Beyond the Basics – Integrate Jaeger Metrics into Prometheus
+The existing `prometheus.yml` already includes a Jaeger scrape job targeting `jaeger:8888/metrics`. **Do not add a duplicate job.** First confirm that the Jaeger version you deployed exposes metrics at this address and that the Jaeger container is connected to the `monitoring` Docker network.
 
-The goal is to monitor the tracing system itself.
-
-First, inspect the running Jaeger configuration and identify the actual metrics endpoint for the deployed version. Metrics ports and paths can vary between Jaeger releases; do not assume that port `8888` is available without verification.
-
-Inspect the Prometheus configuration and back it up before making changes:
+Inspect the existing job and back up the file before any edit:
 
 ```bash
 sudo cat /opt/prometheus-5.3/prometheus.yml
-
-sudo cp /opt/prometheus-5.3/prometheus.yml \
-  /opt/prometheus-5.3/prometheus.yml.backup
+sudo cp /opt/prometheus-5.3/prometheus.yml /opt/prometheus-5.3/prometheus.yml.backup
 ```
 
-If the deployed Jaeger version exposes Prometheus metrics at `jaeger:8888/metrics`, and the Jaeger container is reachable on the `monitoring` network, add this job under `scrape_configs`:
-
-```yaml
-  - job_name: "jaeger"
-    metrics_path: /metrics
-    static_configs:
-      - targets:
-          - "jaeger:8888"
-```
-
-If necessary, attach Jaeger to the shared Docker network:
+If your Jaeger version exposes metrics at a different port or path, edit the existing `jaeger` job in the repository's `prometheus.yml` and copy the updated file to the VM. Keep the other scrape jobs, rule file references, and Alertmanager configuration. Then validate and restart Prometheus:
 
 ```bash
-sudo docker network connect monitoring jaeger
-```
-
-Validate the active Prometheus configuration:
-
-```bash
-sudo docker exec prometheus \
-  promtool check config /etc/prometheus/prometheus.yml
-```
-
-If validation succeeds, restart Prometheus:
-
-```bash
+sudo docker exec prometheus promtool check config /etc/prometheus/prometheus.yml
 sudo docker restart prometheus
+curl -s http://localhost:9090/api/v1/targets | python3 -m json.tool
 ```
 
-Check target discovery:
-
-```bash
-curl -s http://localhost:9090/api/v1/targets \
-  | python3 -m json.tool
-```
-
-Confirm that the Jaeger target is `UP` in Prometheus **Status → Targets**. If it is not, verify the actual Jaeger metrics port and path, container network connectivity, and the Prometheus target configuration.
+Check **Prometheus → Status → Targets**. The Jaeger target should be `UP` only when the configured endpoint is actually served and reachable. If it is `DOWN`, verify the metrics endpoint for your specific Jaeger version and Docker network connectivity.
 
 ## 13. Validation and Troubleshooting
 
 | Component | Validation | Expected result |
 |---|---|---|
 | Prometheus | `curl http://localhost:9090/-/healthy` | Healthy response |
-| Recording rules | Prometheus Rules UI or `/api/v1/rules` | Four recording rules loaded and healthy |
-| Recording metric | Query `instance:cpu_usage_percent:10m` | Metric data returned when sufficient input data exists |
-| Alerting rules | Prometheus Rules UI | `InstanceDown` and `HighCPUUsage` loaded |
+| Recording rules | `promtool check rules` and Prometheus Rules UI | Four rules loaded and healthy |
+| CPU recording metric | Query `instance:cpu_usage_percent:10m` | Data appears after sufficient samples are collected |
+| Alerting rules | Prometheus Rules UI or `/api/v1/rules` | `InstanceDown` and `HighCPUUsage` loaded |
 | Alertmanager | `curl http://localhost:9093/-/healthy` | Healthy response |
-| Alert delivery | `/api/v1/alertmanagers` | Alertmanager discovered by Prometheus |
-| Slack | Trigger `InstanceDown` | Message arrives in the configured channel |
+| Alert delivery | `/api/v1/alertmanagers` | Prometheus discovers Alertmanager |
+| Slack | Temporarily stop Node Exporter | Alert message reaches the configured channel |
 | Node Exporter | Query `up{job="node-exporter"}` | Value returns to `1` after recovery |
-| Jaeger | Jaeger UI and application requests | Services and traces visible |
+| Jaeger | Jaeger UI and HotROD requests | Services and traces visible |
 | HotROD | `curl http://localhost:8080/` | Application responds |
-| Jaeger metrics (optional) | Prometheus Targets | Jaeger target is `UP` if correctly configured |
+| Jaeger metrics | Prometheus Targets page | Target is UP if the configured endpoint is supported |
 
-### Common issues
+Common issues:
 
-- **Recording rules are missing:** Check `rule_files`, mounted file paths, YAML indentation, and Prometheus logs.
-- **Target remains down:** Verify Node Exporter, the scrape target address, the scrape configuration, and private network access.
-- **Alertmanager is not connected:** Check the shared Docker network and the `alertmanager:9093` target.
-- **Slack notification fails:** Inspect Alertmanager logs, validate the receiver configuration, and check webhook file contents and permissions without exposing the secret.
-- **Jaeger UI does not load:** Verify the container, port `16686`, VM network tag, firewall source range, and external IP.
-- **No traces appear:** Verify HotROD requests, the OTLP endpoint, port `4318`, firewall rules, and Jaeger logs.
-- **Jaeger target is down in Prometheus:** Verify the metrics endpoint supported by the installed Jaeger version and ensure the containers can communicate.
+- **Rules are missing:** Check `rule_files`, mounted file paths, YAML indentation, and Prometheus logs.
+- **Target is down:** Verify Node Exporter, its private IP, scrape configuration, and firewall rules.
+- **Alertmanager is not connected:** Confirm the containers share the `monitoring` network and Prometheus targets `alertmanager:9093`.
+- **Slack notification fails:** Inspect Alertmanager logs, route/receiver configuration, secret file path, and permissions without exposing the webhook.
+- **Jaeger UI does not load:** Verify the container, port `16686`, target network tag, firewall source range, and external IP.
+- **No traces appear:** Check HotROD requests, OTLP port `4318`, private connectivity, and Jaeger logs.
+- **Jaeger target is down:** Verify the metrics endpoint supported by your deployed Jaeger version; do not assume port `8888` exists in every release.
 
 ## 14. Assignment Details
 
