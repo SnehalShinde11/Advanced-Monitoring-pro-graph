@@ -1,0 +1,24 @@
+groups:
+  - name: infrastructure-alerts
+    rules:
+
+      # Alert when a monitored instance is down
+      - alert: InstanceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Instance is down"
+          description: "The instance {{ $labels.instance }} has been down for more than 1 minute."
+
+      # Alert when CPU usage is above 80%
+      - alert: HighCPUUsage
+        expr: |
+          instance:cpu_usage_percent:10m > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage"
+          description: "CPU usage on {{ $labels.instance }} has been above 80% for more than 5 minutes."

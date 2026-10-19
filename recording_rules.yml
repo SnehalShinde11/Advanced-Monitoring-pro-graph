@@ -1,0 +1,33 @@
+groups:
+  - name: infrastructure-recording-rules
+    interval: 15s
+    rules:
+
+      - record: instance:cpu_usage_percent:10m
+        expr: |
+          100 - (
+            avg by(instance) (
+              rate(node_cpu_seconds_total{mode="idle"}[10m])
+            ) * 100
+          )
+
+      - record: instance:memory_usage_percent
+        expr: |
+          100 * (
+            1 -
+            node_memory_MemAvailable_bytes
+            /
+            node_memory_MemTotal_bytes
+          )
+
+      - record: instance:network_receive_bytes_per_second
+        expr: |
+          sum by(instance) (
+            rate(node_network_receive_bytes_total[5m])
+          )
+
+      - record: instance:network_transmit_bytes_per_second
+        expr: |
+          sum by(instance) (
+            rate(node_network_transmit_bytes_total[5m])
+          )
